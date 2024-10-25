@@ -6,12 +6,19 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "HaydaaMovementComponent.generated.h"
 
+UENUM(BlueprintType)
+enum ECustomMovementMode : uint8
+{
+	CMOVE_None			UMETA(Hidden),
+	CMOVE_Slide			UMETA(DisplayName = "Slide"),
+	CMOVE_MAX			UMETA(Hidden),
+};
 
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class MECHANICS_API UHaydaaMovementComponent : public UCharacterMovementComponent
 {
 	GENERATED_BODY()
-
+	UHaydaaMovementComponent();
 public:
 	class FSavedMove_Haydaa : public FSavedMove_Character
 	{
@@ -35,9 +42,13 @@ public:
 
 		virtual FSavedMovePtr AllocateNewMove() override;
 	};
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = Walking) float Sprint_MaxWalkSpeed = 1000.f;
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = Walking) float Sprint_DefaultMaxWalkSpeed = 500.f;
-
+	UPROPERTY(EditDefaultsOnly, Category = Walking) float Sprint_MaxWalkSpeed = 1000.f;
+	UPROPERTY(EditDefaultsOnly, Category = Walking) float Sprint_DefaultMaxWalkSpeed = 500.f;
+	UPROPERTY(EditDefaultsOnly, Category = Slide) float Slide_MinSpeed=400;
+   	UPROPERTY(EditDefaultsOnly, Category = Slide) float Slide_EnterImpulse=400;
+    UPROPERTY(EditDefaultsOnly, Category = Slide) float Slide_GravityForce=200;
+    UPROPERTY(EditDefaultsOnly, Category = Slide) float Slide_Friction=.1;
+	
 	bool Safe_bWantsToSprit;
 	
 	virtual FNetworkPredictionData_Client* GetPredictionData_Client() const override;
@@ -49,5 +60,19 @@ protected:
 	UFUNCTION(BlueprintCallable) void SprintReleased();
 	
 	virtual void OnMovementUpdated(float DeltaSeconds, const FVector& OldLocation, const FVector& OldVelocity) override;
+
+private:
+	virtual void UpdateCharacterStateBeforeMovement(float DeltaSeconds) override;
+	virtual void PhysCustom(float deltaTime, int32 Iterations) override;
+	bool IsCustomMovementMode(ECustomMovementMode InCustomMovementMode) const;
+	bool IsMovingOnGround() const override;
+	bool CanCrouchInCurrentState() const override;
+	virtual void InitializeComponent() override;
+	void EnterSlide();
+	void ExitSlide();
+	void PhysSlide(float deltaTime, int32 Iterations);
+	bool GetSlideSurface(FHitResult& Hit) const;
+	TObjectPtr<AMechanicsCharacter> HaydaaaCharacterOwner;
+
 };
 

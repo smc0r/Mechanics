@@ -81,6 +81,18 @@ void AMechanicsCharacter::BeginPlay()
 	// if (GEngine) GEngine->AddOnScreenDebugMessage(4, 10.f, FColor::MakeRandomColor(), FString::Printf(TEXT("Num: %d"), what));
 }
 
+FCollisionQueryParams AMechanicsCharacter::GetIgnoreCharacterParams()
+{
+	FCollisionQueryParams Params;
+
+	TArray<AActor*> CharacterChildren;
+	GetAllChildActors(CharacterChildren);
+	Params.AddIgnoredActors(CharacterChildren);
+	Params.AddIgnoredActor(this);
+
+	return Params;
+}
+
 //////////////////////////////////////////////////////////////////////////
 // Input
 

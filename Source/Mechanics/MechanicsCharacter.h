@@ -122,5 +122,7 @@ public:
 	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
 
 	uint8 what:2;
+
+	FCollisionQueryParams GetIgnoreCharacterParams();
 };
 
