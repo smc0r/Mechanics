@@ -2,9 +2,17 @@
 
 
 #include "HaydaaMovementComponent.h"
+
+#include "MechanicsCharacter.h"
+#include "Components/CapsuleComponent.h"
 #include "GameFramework/Character.h"
 
 #pragma region Things
+UHaydaaMovementComponent::UHaydaaMovementComponent()
+{
+	NavAgentProps.bCanCrouch = true;
+}
+
 bool UHaydaaMovementComponent::FSavedMove_Haydaa::CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* InCharacter,
                                                                  float MaxDelta) const
 {
@@ -101,3 +109,152 @@ void UHaydaaMovementComponent::OnMovementUpdated(float DeltaSeconds, const FVect
 		MaxWalkSpeed = Sprint_DefaultMaxWalkSpeed;
 	}
 }
+
+void UHaydaaMovementComponent::UpdateCharacterStateBeforeMovement(float DeltaSeconds)
+{
+	/* Ornek
+	if (MovementMode == MOVE_Walking && !bWantsToCrouch && Safe_bPrevWantsToCrouch)
+	{
+		FHitResult PotentialSlideSurface;
+		if (Velocity.SizeSquared() > pow(Slide_MinSpeed, 2) && GetSlideSurface(PotentialSlideSurface))
+		{
+			EnterSlide();
+		}
+	}
+
+	if (IsCustomMovementMode(CMOVE_Slide) && !bWantsToCrouch)
+	{
+		SetMovementMode(MOVE_Walking);
+	}
+	
+	*/
+	Super::UpdateCharacterStateBeforeMovement(DeltaSeconds);
+}
+
+void UHaydaaMovementComponent::PhysCustom(float deltaTime, int32 Iterations)
+{
+	Super::PhysCustom(deltaTime, Iterations);
+	switch (CustomMovementMode)
+	{
+	case CMOVE_Slide:
+		PhysSlide(deltaTime, Iterations);
+		break;
+	default:
+		UE_LOG(LogTemp, Fatal, TEXT("Invalid Movement Mode"))
+	}
+}
+
+bool UHaydaaMovementComponent::IsCustomMovementMode(ECustomMovementMode InCustomMovementMode) const
+{
+	return MovementMode == MOVE_Custom && CustomMovementMode == InCustomMovementMode;
+}
+
+bool UHaydaaMovementComponent::IsMovingOnGround() const
+{
+	return Super::IsMovingOnGround() && IsCustomMovementMode(CMOVE_Slide);;
+}
+
+bool UHaydaaMovementComponent::CanCrouchInCurrentState() const
+{
+	return Super::CanCrouchInCurrentState();
+}
+
+void UHaydaaMovementComponent::InitializeComponent()
+{
+	Super::InitializeComponent();
+	HaydaaaCharacterOwner = Cast<AMechanicsCharacter>(GetOwner());
+}
+
+void UHaydaaMovementComponent::EnterSlide()
+{
+	bWantsToCrouch = true;
+	Velocity += Velocity.GetSafeNormal2D() * Slide_EnterImpulse;
+	SetMovementMode(MOVE_Custom, CMOVE_Slide);
+}
+
+void UHaydaaMovementComponent::ExitSlide()
+{
+	bWantsToCrouch = false;
+	
+	FQuat NewRotation = FRotationMatrix::MakeFromXZ(UpdatedComponent->GetForwardVector().GetSafeNormal2D(), FVector::UpVector).ToQuat();
+	FHitResult Hit;
+	SafeMoveUpdatedComponent(FVector::ZeroVector, NewRotation, true, Hit);
+	SetMovementMode(MOVE_Walking);
+}
+
+void UHaydaaMovementComponent::PhysSlide(float deltaTime, int32 Iterations)
+{
+	if (deltaTime < MIN_TICK_TIME)
+	{
+		return;
+	}
+	
+	RestorePreAdditiveRootMotionVelocity();
+
+	FHitResult SurfaceHit;
+	if (!GetSlideSurface(SurfaceHit) || Velocity.SizeSquared() < pow(Slide_MinSpeed, 2))
+	{
+		ExitSlide();
+		StartNewPhysics(deltaTime, Iterations);
+		return;
+	}
+
+	// Surface Gravity
+	Velocity += Slide_GravityForce * FVector::DownVector * deltaTime;
+
+	// Strafe
+	if (FMath::Abs(FVector::DotProduct(Acceleration.GetSafeNormal(), UpdatedComponent->GetRightVector())) > .5)
+	{
+		Acceleration = Acceleration.ProjectOnTo(UpdatedComponent->GetRightVector());
+	}
+	else
+	{
+		Acceleration = FVector::ZeroVector;
+	}
+
+	// Calc Velocity
+	if(!HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity())
+	{
+		CalcVelocity(deltaTime, Slide_Friction, true, GetMaxBrakingDeceleration());
+	}
+	ApplyRootMotionToVelocity(deltaTime);
+
+	// Perform Move
+	Iterations++;
+	bJustTeleported = false;
+	
+	FVector OldLocation = UpdatedComponent->GetComponentLocation();
+	FQuat OldRotation = UpdatedComponent->GetComponentRotation().Quaternion();
+	FHitResult Hit(1.f);
+	FVector Adjusted = Velocity * deltaTime;
+	FVector VelPlaneDir = FVector::VectorPlaneProject(Velocity, SurfaceHit.Normal).GetSafeNormal();
+	FQuat NewRotation = FRotationMatrix::MakeFromXZ(VelPlaneDir, SurfaceHit.Normal).ToQuat();
+	SafeMoveUpdatedComponent(Adjusted, NewRotation, true, Hit);
+
+	if (Hit.Time < 1.f)
+	{
+		HandleImpact(Hit, deltaTime, Adjusted);
+		SlideAlongSurface(Adjusted, (1.f - Hit.Time), Hit.Normal, Hit, true);
+	}
+
+	FHitResult NewSurfaceHit;
+	if (!GetSlideSurface(NewSurfaceHit) || Velocity.SizeSquared() < pow(Slide_MinSpeed, 2))
+	{
+		ExitSlide();
+	}
+	
+	// Update Outgoing Velocity & Acceleration
+	if( !bJustTeleported && !HasAnimRootMotion() && !CurrentRootMotion.HasOverrideVelocity())
+	{
+		Velocity = (UpdatedComponent->GetComponentLocation() - OldLocation) / deltaTime;
+	}
+}
+
+bool UHaydaaMovementComponent::GetSlideSurface(FHitResult& Hit) const
+{
+	FVector Start = UpdatedComponent->GetComponentLocation();
+	FVector End = Start + CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() * 2.f * FVector::DownVector;
+	FName ProfileName = TEXT("BlockAll");
+	return GetWorld()->LineTraceSingleByProfile(Hit, Start, End, ProfileName, HaydaaaCharacterOwner->GetIgnoreCharacterParams());
+}
+
